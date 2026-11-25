@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="sr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#123f48">
+  <meta name="description" content="Privatni kalendar smena sa proverom rasporeda i podsetnicima.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2312616a'/%3E%3Cpath d='M27 13h10v14h14v10H37v14H27V37H13V27h14z' fill='white'/%3E%3C/svg%3E">
+  <title>Raspored smena</title>
+  <style>/* APP_CSS */</style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">✚</span><span><strong>Raspored smena</strong><small>Moj radni mesec, na jednom mestu</small></span></div>
+      <div class="top-actions"><span id="statusBadge" class="status-badge">Nema rasporeda</span><button id="newScheduleBtn" class="button subtle" type="button">Učitaj novi raspored</button></div>
+    </header>
+    <main>
+      <section id="welcome" class="welcome panel">
+        <div class="eyebrow">RASPORED POD KONTROLOM</div>
+        <h1>Znaj unapred kada radiš.</h1>
+        <p>Učitaj fotografiju mesečnog rasporeda, proveri svaku smenu i izaberi svoj redni broj. Posle toga vidiš svoj kalendar, kolege u smeni i podsetnik za sutra.</p>
+        <div class="welcome-steps"><span><b>1</b> Učitaj sliku</span><span><b>2</b> Proveri raspored</span><span><b>3</b> Izaberi svoj broj</span></div>
+        <button id="startBtn" class="button primary" type="button">Učitaj raspored</button>
+      </section>
+
+      <section id="dashboard" hidden>
+        <div class="section-heading"><div><div class="eyebrow">MOJ RASPORED</div><h1 id="dashboardMonth">Raspored</h1><select id="scheduleSelect" class="month-select" aria-label="Izaberi mesec rasporeda"></select></div><label class="person-picker">Ja sam redni broj <select id="personSelect" aria-label="Moj redni broj"></select></label></div>
+        <div class="dashboard-grid">
+          <div class="main-column">
+            <div class="summary-row"><article class="summary-card emphasis"><span>SUTRA</span><strong id="tomorrowShift">—</strong><small id="tomorrowDate">—</small></article><article class="summary-card"><span>OVOG MESECA</span><strong id="workdayCount">—</strong><small>radnih dana / noći</small></article><article class="summary-card"><span>PODSETNIK</span><strong>18:00</strong><small>prethodnog dana</small></article></div>
+            <section class="panel calendar-panel"><div class="panel-heading"><div><div class="eyebrow">MESEČNI PREGLED</div><h2 id="calendarTitle">Kalendar</h2></div><button id="exportBtn" class="button outline" type="button">Preuzmi podsetnike</button></div><div class="weekday-row"><span>Pon</span><span>Uto</span><span>Sre</span><span>Čet</span><span>Pet</span><span>Sub</span><span>Ned</span></div><div id="calendar" class="calendar" aria-label="Mesečni kalendar"></div><div class="legend"><span><i class="dot first"></i>1 Prva</span><span><i class="dot second"></i>2 Druga</span><span><i class="dot day"></i>D Dan</span><span><i class="dot night"></i>N Noć</span><span><i class="dot off"></i>Slobodno</span></div></section>
+          </div>
+          <aside class="side-column"><section class="panel detail-panel"><div class="eyebrow">IZABRANI DAN</div><h2 id="detailDate">—</h2><div id="detailShift" class="detail-shift">—</div><div class="overlap-title">Ko radi sa mnom</div><div id="overlapList" class="overlap-list"></div><details class="hours-settings"><summary>Vreme smena za preklapanja</summary><p>Prva: 07–15 · druga: 13–21. Podesi D i N ako se razlikuju u tvojoj ustanovi.</p><div class="hours-grid"><label>D od <input id="dayStart" type="time" value="07:00"></label><label>D do <input id="dayEnd" type="time" value="19:00"></label><label>N od <input id="nightStart" type="time" value="19:00"></label><label>N do <input id="nightEnd" type="time" value="07:00"></label></div></details></section><section class="panel reminder-panel"><div class="reminder-icon" aria-hidden="true">◷</div><h3>Podsetnik dan ranije</h3><p>Preuzmi kalendarske podsetnike. Telefon će prikazati poruku u 18:00 prethodnog dana, i za radne i za slobodne dane.</p><button id="exportAsideBtn" class="button primary wide" type="button">Preuzmi .ics kalendar</button><small>Uvezi preuzetu datoteku u kalendar telefona. Posle izmene rasporeda preuzmi novu.</small></section></aside>
+        </div>
+      </section>
+
+      <section id="importView" hidden><div class="section-heading"><div><div class="eyebrow">NOVI MESEC</div><h1>Učitaj i proveri raspored</h1></div><button id="backBtn" class="button subtle" type="button">Nazad na kalendar</button></div>
+        <div class="import-grid"><section class="panel upload-panel"><div class="step-number">01 / FOTOGRAFIJA</div><h2>Dodaj sliku rasporeda</h2><label id="dropzone" class="dropzone"><input id="imageInput" type="file" accept="image/jpeg,image/png,image/webp" aria-label="Fotografija rasporeda"><span class="upload-icon" aria-hidden="true">▧</span><strong>Izaberi fotografiju</strong><span>JPG, PNG ili WebP · do 10 MB</span></label><div id="imageMeta" class="image-meta" hidden></div><img id="sourcePreview" class="source-preview" alt="Učitana fotografija rasporeda" hidden><p class="help">Fotografiju koristiš kao referencu pri proveri. Ne čuva se posle zatvaranja stranice.</p></section>
+        <section class="panel setup-panel"><div class="step-number">02 / PREPOZNAVANJE</div><h2>Pročitaj rukopis</h2><p>Za automatsko prepoznavanje unesi svoj OpenAI API ključ. Šalje se samo za ovaj zahtev i ne čuva se. Rukopis može biti pogrešno pročitan, zato je pregled obavezan.</p><label>OpenAI API ključ<input id="apiKey" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false"></label><button id="recognizeBtn" class="button primary wide" type="button">Prepoznaj raspored sa slike</button><div id="recognitionMessage" class="notice" role="status"></div><div class="manual-divider">ili unesi raspored ručno</div><div class="month-fields"><label>Mesec<select id="monthInput"></select></label><label>Godina<input id="yearInput" type="number" min="2000" max="2100"></label></div><button id="manualBtn" class="button outline wide" type="button">Otvori praznu tabelu</button></section></div>
+        <section id="reviewSection" class="panel review-panel" hidden><div class="panel-heading"><div><div class="step-number">03 / PROVERA</div><h2>Proveri pre usvajanja</h2><p>Dodirni ćeliju da promeniš smenu. Znak <b>?</b> znači da očitavanje nije pouzdano. Slobodan dan označi sa <b>—</b>.</p></div><div id="reviewCount" class="review-count"></div></div><div class="review-tools"><button id="addPersonBtn" class="button outline" type="button">Dodaj osobu</button><span>Legenda: 1 prva · 2 druga · D dan · N noć · — slobodno · ? proveri</span></div><div class="table-scroll"><table id="reviewTable" class="review-table"></table></div><div class="confirm-row"><label class="confirm-check"><input id="confirmCheck" type="checkbox"> Pregledao/la sam imena i sve dnevne smene na originalnoj slici.</label><button id="confirmBtn" class="button primary" type="button" disabled>Potvrdi i usvoji raspored</button></div><div id="confirmMessage" class="notice" role="status"></div></section>
+      </section>
+    </main>
+    <footer>Raspored se čuva samo u ovom pregledaču. Za drugi telefon učitaj raspored ponovo.</footer>
+  </div>
+  <script>/* APP_JS */</script>
+</body>
+</html>
