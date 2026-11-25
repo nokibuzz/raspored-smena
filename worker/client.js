@@ -9,6 +9,7 @@
   let imageData = '';
   let selectedDay = 1;
   let currentView = 'welcome';
+  let canEdit = true;
 
   function load() {
     try {
@@ -30,7 +31,8 @@
     $('importView').hidden = view !== 'import';
     $('statusBadge').textContent = active() ? 'Potvrđen raspored' : 'Nema rasporeda';
     $('statusBadge').classList.toggle('ready', !!active());
-    $('newScheduleBtn').hidden = view === 'import';
+    $('newScheduleBtn').hidden = view === 'import' || !canEdit;
+    $('startBtn').hidden = !canEdit;
     if (view === 'dashboard') renderDashboard();
   }
   function setNotice(id, message, error = false) { $(id).textContent = message; $(id).classList.toggle('error', error); }
@@ -205,15 +207,27 @@
     $('reviewCount').classList.toggle('warning', !!problems.length);
     $('confirmBtn').disabled = !!problems.length || !$('confirmCheck').checked;
   }
-  $('confirmBtn').addEventListener('click', () => {
+  $('confirmBtn').addEventListener('click', async () => {
     if (reviewProblems().length || !$('confirmCheck').checked) return;
     const clean = normalize(draft);
+    $('confirmBtn').disabled = true;
+    $('confirmBtn').textContent = 'Čuvam raspored…';
+    try {
+      const response = await fetch('/api/schedules', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(clean) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Raspored nije mogao da se sačuva.');
+    } catch (error) {
+      $('confirmBtn').textContent = 'Potvrdi i usvoji raspored';
+      updateReviewStatus();
+      return setNotice('confirmMessage', error.message || 'Raspored nije mogao da se sačuva.', true);
+    }
     saved.schedules[keyOf(clean)] = clean;
     saved.activeKey = keyOf(clean);
     if (!clean.people.some((p) => p.number === Number(saved.selectedNumber))) saved.selectedNumber = clean.people[0].number;
     try { save(); } catch { return setNotice('confirmMessage', 'Pregledač nije mogao da sačuva raspored. Proveri dozvolu za čuvanje podataka.', true); }
     imageData = '';
     $('apiKey').value = '';
+    $('confirmBtn').textContent = 'Potvrdi i usvoji raspored';
     show('dashboard');
     window.scrollTo({top:0,behavior:'smooth'});
   });
@@ -322,4 +336,13 @@
     $(id).addEventListener('change', () => { saved.hours[id] = $(id).value; save(); if (active()) renderDetails(); });
   });
   if (active()) show('dashboard'); else show('welcome');
+  fetch('/api/schedules').then(async (response) => {
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || '');
+    canEdit = result.canEdit !== false;
+    saved.schedules = { ...saved.schedules, ...result.schedules };
+    if (!active()) saved.activeKey = Object.keys(saved.schedules).sort().at(-1) || '';
+    save();
+    if (currentView !== 'import') show(active() ? 'dashboard' : 'welcome');
+  }).catch(() => { /* Previously confirmed local data remains available offline. */ });
 })();

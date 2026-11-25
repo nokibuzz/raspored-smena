@@ -10,7 +10,7 @@ Privatna web aplikacija za mesečni raspored rada sa fotografije. Učitavanje ru
 4. Potvrdi pregled. Izaberi svoj redni broj u kalendaru.
 5. Preuzmi `.ics` datoteku i uvezi je u kalendar telefona. Podsetnici su podešeni za 18:00 prethodnog dana, uključujući slobodne dane.
 
-Rasporedi i izbor osobe čuvaju se u `localStorage` tekućeg pregledača. Fotografija i API ključ se ne čuvaju. Ako se raspored izmeni, ponovo uvezi novu `.ics` datoteku. Sati dnevne i noćne smene koji se koriste za prikaz preklapanja mogu se podesiti u detaljima dana.
+Potvrđeni rasporedi čuvaju se zajednički u privatnom R2 prostoru sajta. Prva osoba koja usvoji raspored postaje urednik rasporeda; drugi korisnici kojima je odobren pristup mogu da vide kalendar i izaberu sebe. Izbor osobe i kopija rasporeda čuvaju se i u `localStorage` tekućeg pregledača. Fotografija i API ključ se ne čuvaju. Ako se raspored izmeni, ponovo uvezi novu `.ics` datoteku. Sati dnevne i noćne smene koji se koriste za prikaz preklapanja mogu se podesiti u detaljima dana.
 
 ## Lokalni razvoj
 
