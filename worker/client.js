@@ -174,7 +174,7 @@
     renderRowReview();
   });
 
-  function renderRowReview() {
+  function renderRowReview(focus = true) {
     if (!draft?.people.length) return;
     selectedReviewRow = Math.max(0, Math.min(selectedReviewRow, draft.people.length - 1));
     const picker = $('reviewPersonSelect');
@@ -221,6 +221,14 @@
         cell.querySelector('.suggestion')?.remove();
         updateReviewStatus();
       });
+      select.addEventListener('keydown', (event) => {
+        const code = ({'0':'-', '-':'-', '1':'1', '2':'2', 'd':'D', 'n':'N'})[event.key.toLowerCase()];
+        if (!code) return;
+        event.preventDefault();
+        select.value = code;
+        select.dispatchEvent(new Event('change'));
+        grid.querySelectorAll('select')[dayIndex + 1]?.focus();
+      });
       cell.append(label, select);
       if (code === '?' && person.suggestions?.[dayIndex]) {
         const suggestion = document.createElement('button'); suggestion.type = 'button'; suggestion.className = 'suggestion';
@@ -231,7 +239,7 @@
       }
       grid.append(cell);
     });
-    grid.querySelectorAll('select')[selectedReviewDay]?.focus();
+    if (focus) grid.querySelectorAll('select')[selectedReviewDay]?.focus();
   }
 
   function renderReview() {
@@ -271,7 +279,7 @@
         select.setAttribute('aria-label', p.name + ', ' + (dayIndex + 1) + '. ' + MONTHS[draft.month - 1]);
         [['?','?'],['-','—'],['1','1'],['2','2'],['D','D'],['N','N']].forEach(([value, label]) => select.add(new Option(label, value)));
         select.value = code;
-        select.addEventListener('change', () => { p.shifts[dayIndex] = select.value; if (p.suggestions) p.suggestions[dayIndex] = null; select.className = 'v-' + select.value; updateReviewStatus(); if (selectedReviewRow === rowIndex) renderRowReview(); });
+        select.addEventListener('change', () => { p.shifts[dayIndex] = select.value; if (p.suggestions) p.suggestions[dayIndex] = null; select.className = 'v-' + select.value; updateReviewStatus(); if (selectedReviewRow === rowIndex) renderRowReview(false); });
         select.addEventListener('focus', () => {
           const image = $('sourcePreview');
           if ($('imageFrame').hidden || !image.complete || !image.naturalWidth) return;
