@@ -48,15 +48,14 @@ export default {
       if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(body.image || "") || body.image.length > 13_000_000) {
         return json({ error: "Pošalji JPG, PNG ili WebP sliku do 10 MB." }, 400);
       }
-      const model = typeof body.model === "string" && /^[a-zA-Z0-9._-]{3,60}$/.test(body.model) ? body.model : "gpt-4.1-mini";
+      const model = typeof body.model === "string" && /^[a-zA-Z0-9._-]{3,60}$/.test(body.model) ? body.model : "gpt-5.4-mini";
       try {
         const upstream = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
           body: JSON.stringify({
             model,
-            temperature: 0,
-            max_tokens: 12000,
+            max_completion_tokens: 12000,
             response_format: { type: "json_object" },
             messages: [
               { role: "system", content: SYSTEM_PROMPT },
