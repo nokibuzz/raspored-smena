@@ -9,7 +9,6 @@
   let imageData = '';
   let selectedDay = 1;
   let currentView = 'welcome';
-  let canEdit = true;
 
   function load() {
     try {
@@ -31,8 +30,7 @@
     $('importView').hidden = view !== 'import';
     $('statusBadge').textContent = active() ? 'Potvrđen raspored' : 'Nema rasporeda';
     $('statusBadge').classList.toggle('ready', !!active());
-    $('newScheduleBtn').hidden = view === 'import' || !canEdit;
-    $('startBtn').hidden = !canEdit;
+    $('newScheduleBtn').hidden = view === 'import';
     if (view === 'dashboard') renderDashboard();
   }
   function setNotice(id, message, error = false) { $(id).textContent = message; $(id).classList.toggle('error', error); }
@@ -46,7 +44,8 @@
     draft = null;
     imageData = '';
     $('imageInput').value = '';
-    $('sourcePreview').hidden = true;
+    $('imageFrame').hidden = true;
+    $('gridControls').hidden = true;
     $('imageMeta').hidden = true;
     setNotice('recognitionMessage', '');
     setNotice('confirmMessage', '');
@@ -74,7 +73,9 @@
       reader.readAsDataURL(file);
     });
     $('sourcePreview').src = imageData;
-    $('sourcePreview').hidden = false;
+    $('imageFrame').hidden = false;
+    $('gridControls').hidden = false;
+    $('sourcePreview').onload = () => window.RasporedOCR.renderGrid();
     $('imageMeta').textContent = file.name + ' · ' + Math.round(file.size / 1024) + ' KB';
     $('imageMeta').hidden = false;
     setNotice('recognitionMessage', 'Slika je spremna. Pokreni prepoznavanje ili unesi raspored ručno.');
@@ -82,26 +83,32 @@
 
   $('recognizeBtn').addEventListener('click', async () => {
     if (!imageData) return setNotice('recognitionMessage', 'Prvo izaberi fotografiju rasporeda.', true);
-    const key = $('apiKey').value.trim();
-    if (!key) return setNotice('recognitionMessage', 'Unesi OpenAI API ključ za prepoznavanje rukopisa.', true);
+    const month = Number($('monthInput').value), year = Number($('yearInput').value);
+    if (!month || year < 2000 || year > 2100) return setNotice('recognitionMessage', 'Izaberi ispravan mesec i godinu.', true);
     const button = $('recognizeBtn');
     button.disabled = true;
     button.textContent = 'Čitam raspored…';
-    setNotice('recognitionMessage', 'Obrada može potrajati oko minut.');
+    setNotice('recognitionMessage', 'Pripremam prepoznavanje na tvom uređaju…');
     try {
-      const response = await fetch('/api/parse', { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-openai-key': key }, body: JSON.stringify({ image: imageData }) });
-      const body = await response.json();
-      if (!response.ok) throw new Error(body.error || 'Prepoznavanje nije uspelo.');
-      draft = normalize(body.result);
+      const result = await window.RasporedOCR.recognize($('sourcePreview'), month, year, (message) => setNotice('recognitionMessage', message));
+      draft = normalize(result);
       $('monthInput').value = String(draft.month);
       $('yearInput').value = String(draft.year);
       $('confirmCheck').checked = false;
       renderReview();
-      setNotice('recognitionMessage', 'Raspored je pročitan. Proveri svaku ćeliju ispod pre potvrde.');
+      setNotice('recognitionMessage', 'Prepoznato je ' + (result.people.length * daysIn(month, year) - result.unknown) + ' polja; ' + result.unknown + ' treba ručno proveriti. Uporedi sva polja sa slikom.');
       $('reviewSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
-    } catch (error) { setNotice('recognitionMessage', error.message || 'Prepoznavanje nije uspelo.', true); }
-    finally { button.disabled = false; button.textContent = 'Prepoznaj raspored sa slike'; }
+    } catch (error) { setNotice('recognitionMessage', 'Prepoznavanje nije uspelo: ' + (error.message || 'proveri vezu i pokušaj ponovo.'), true); }
+    finally { button.disabled = false; button.textContent = 'Prepoznaj raspored na uređaju'; }
   });
+
+  ['rowCount','gridDayStart','gridRight','gridTop','gridBottom','gridTilt'].forEach((id) => {
+    $(id).addEventListener('input', () => {
+      ['gridDayStart','gridRight','gridTop','gridBottom','gridTilt'].forEach((key) => $(key + 'Value').textContent = $(key).value + '%');
+      window.RasporedOCR.renderGrid();
+    });
+  });
+  ['gridDayStart','gridRight','gridTop','gridBottom','gridTilt'].forEach((key) => $(key + 'Value').textContent = $(key).value + '%');
 
   function normalize(input) {
     const fallbackMonth = Number($('monthInput').value);
@@ -119,7 +126,7 @@
         return '?';
       });
       return { number: Number.isInteger(Number(p.number)) && Number(p.number) > 0 ? Number(p.number) : index + 1, name: String(p.name || '').trim(), shifts };
-    }).filter((p) => p.name) : [];
+    }) : [];
     return { month, year, people };
   }
   $('manualBtn').addEventListener('click', () => {
@@ -154,12 +161,14 @@
     renderReview();
     $('reviewTable').querySelector('tbody tr:last-child input[name="name"]')?.focus();
   });
+  $('reviewSection').querySelector('.review-tools span').textContent += ' · —? uz ime: posle provere reda označi preostala nejasna polja kao slobodna';
 
   function renderReview() {
     if (!draft) return;
     $('reviewSection').hidden = false;
     const table = $('reviewTable');
     table.replaceChildren();
+    $('cellInspector').hidden = true;
     const head = document.createElement('thead'), hrow = document.createElement('tr');
     ['#','Ime i prezime', ...Array.from({length:daysIn(draft.month, draft.year)}, (_, i) => String(i + 1))].forEach((label) => {
       const th = document.createElement('th'); th.textContent = label; hrow.append(th);
@@ -175,7 +184,16 @@
       const nameCell = document.createElement('td'), nameInput = document.createElement('input');
       nameInput.name = 'name'; nameInput.value = p.name; nameInput.placeholder = 'Ime i prezime'; nameInput.setAttribute('aria-label', 'Ime i prezime osobe ' + (rowIndex + 1));
       nameInput.addEventListener('input', () => { p.name = nameInput.value.trim(); updateReviewStatus(); });
-      nameCell.append(nameInput); row.append(nameCell);
+      const nameWrap = document.createElement('div'); nameWrap.className = 'name-wrap';
+      const fillOff = document.createElement('button'); fillOff.type = 'button'; fillOff.textContent = '—?';
+      fillOff.title = 'Posle provere reda, označi preostala nejasna polja kao slobodna';
+      fillOff.setAttribute('aria-label', 'Označi preostala nejasna polja za ' + (p.name || 'osobu ' + p.number) + ' kao slobodna');
+      fillOff.addEventListener('click', () => {
+        p.shifts = p.shifts.map((code) => code === '?' ? '-' : code);
+        const scroll = table.parentElement, left = scroll.scrollLeft, top = scroll.scrollTop;
+        renderReview(); scroll.scrollLeft = left; scroll.scrollTop = top;
+      });
+      nameWrap.append(nameInput, fillOff); nameCell.append(nameWrap); row.append(nameCell);
       p.shifts.forEach((code, dayIndex) => {
         const cell = document.createElement('td'), select = document.createElement('select');
         select.className = 'v-' + code;
@@ -183,6 +201,22 @@
         [['?','?'],['-','—'],['1','1'],['2','2'],['D','D'],['N','N']].forEach(([value, label]) => select.add(new Option(label, value)));
         select.value = code;
         select.addEventListener('change', () => { p.shifts[dayIndex] = select.value; select.className = 'v-' + select.value; updateReviewStatus(); });
+        select.addEventListener('focus', () => {
+          const image = $('sourcePreview');
+          if ($('imageFrame').hidden || !image.complete || !image.naturalWidth) return;
+          $('cellInspectorTitle').textContent = (p.name || 'Osoba ' + p.number) + ' · ' + (dayIndex + 1) + '. ' + MONTHS[draft.month - 1];
+          $('cellInspectorImage').replaceChildren(window.RasporedOCR.previewCell(image, rowIndex, dayIndex));
+          $('cellInspector').hidden = false;
+        });
+        select.addEventListener('keydown', (event) => {
+          const code = ({'0':'-', '-':'-', '1':'1', '2':'2', 'd':'D', 'n':'N'})[event.key.toLowerCase()];
+          if (!code) return;
+          event.preventDefault();
+          select.value = code;
+          select.dispatchEvent(new Event('change'));
+          const next = row.querySelectorAll('select')[dayIndex + 1] || row.nextElementSibling?.querySelector('select');
+          next?.focus();
+        });
         cell.append(select); row.append(cell);
       });
       tbody.append(row);
@@ -195,7 +229,7 @@
     if (!draft) return ['Nema rasporeda.'];
     const problems = [];
     if (!draft.people.length) problems.push('Nema prepoznatih osoba.');
-    if (draft.people.some((p) => !p.name.trim())) problems.push('Unesi sva imena.');
+    if (draft.people.some((p) => !p.name.trim() || p.name.trim() === '?')) problems.push('Proveri sva imena.');
     if (draft.people.some((p) => !Number.isInteger(p.number) || p.number < 1) || new Set(draft.people.map((p) => p.number)).size !== draft.people.length) problems.push('Redni brojevi moraju biti jedinstveni.');
     const unknown = draft.people.reduce((sum, p) => sum + p.shifts.filter((s) => s === '?').length, 0);
     if (unknown) problems.push(unknown + ' nejasnih polja treba proveriti.');
@@ -212,22 +246,14 @@
     const clean = normalize(draft);
     $('confirmBtn').disabled = true;
     $('confirmBtn').textContent = 'Čuvam raspored…';
-    try {
-      const response = await fetch('/api/schedules', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(clean) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Raspored nije mogao da se sačuva.');
-    } catch (error) {
-      $('confirmBtn').textContent = 'Potvrdi i usvoji raspored';
-      updateReviewStatus();
-      return setNotice('confirmMessage', error.message || 'Raspored nije mogao da se sačuva.', true);
-    }
     saved.schedules[keyOf(clean)] = clean;
     saved.activeKey = keyOf(clean);
     if (!clean.people.some((p) => p.number === Number(saved.selectedNumber))) saved.selectedNumber = clean.people[0].number;
     try { save(); } catch { return setNotice('confirmMessage', 'Pregledač nije mogao da sačuva raspored. Proveri dozvolu za čuvanje podataka.', true); }
     imageData = '';
-    $('apiKey').value = '';
     $('confirmBtn').textContent = 'Potvrdi i usvoji raspored';
+    const link = await shareLink(clean);
+    history.replaceState(null, '', link);
     show('dashboard');
     window.scrollTo({top:0,behavior:'smooth'});
   });
@@ -311,6 +337,57 @@
       item.append(avatar,name,match); list.append(item);
     });
   }
+  function validShared(schedule) {
+    if (!schedule || !Number.isInteger(schedule.month) || schedule.month < 1 || schedule.month > 12 || !Number.isInteger(schedule.year) || schedule.year < 2000 || schedule.year > 2100 || !Array.isArray(schedule.people) || !schedule.people.length || schedule.people.length > 100) return false;
+    const days = daysIn(schedule.month, schedule.year), numbers = new Set();
+    return schedule.people.every((p) => {
+      if (!Number.isInteger(p.number) || p.number < 1 || numbers.has(p.number) || typeof p.name !== 'string' || !p.name.trim() || p.name.length > 120 || !Array.isArray(p.shifts) || p.shifts.length !== days || p.shifts.some((s) => !['1','2','D','N','-'].includes(s))) return false;
+      numbers.add(p.number); return true;
+    });
+  }
+  function toBase64Url(bytes) {
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+  function fromBase64Url(value) {
+    const binary = atob(value.replace(/-/g, '+').replace(/_/g, '/'));
+    return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  }
+  async function shareLink(schedule) {
+    const plain = new TextEncoder().encode(JSON.stringify(schedule));
+    let bytes = plain, type = 'u';
+    if (typeof CompressionStream !== 'undefined') {
+      try {
+        bytes = new Uint8Array(await new Response(new Blob([plain]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+        type = 'g';
+      } catch { bytes = plain; }
+    }
+    return location.origin + location.pathname + '#r=' + type + toBase64Url(bytes);
+  }
+  async function loadShared() {
+    const fragment = location.hash.match(/^#r=([ug])([A-Za-z0-9_-]+)$/);
+    if (!fragment || fragment[2].length > 100000) return;
+    try {
+      let bytes = fromBase64Url(fragment[2]);
+      if (fragment[1] === 'g') bytes = new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+      if (bytes.length > 100000) return;
+      const schedule = JSON.parse(new TextDecoder().decode(bytes));
+      if (!validShared(schedule)) return;
+      saved.schedules[keyOf(schedule)] = schedule;
+      saved.activeKey = keyOf(schedule);
+      if (!schedule.people.some((p) => p.number === Number(saved.selectedNumber))) saved.selectedNumber = schedule.people[0].number;
+      save();
+      if (currentView !== 'import') show('dashboard');
+    } catch { /* A damaged share link does not overwrite a confirmed local schedule. */ }
+  }
+  $('shareBtn').addEventListener('click', async () => {
+    if (!active()) return;
+    const link = await shareLink(active());
+    history.replaceState(null, '', link);
+    try { await navigator.clipboard.writeText(link); $('shareMessage').textContent = 'Link je kopiran. Pošalji ga osobama kojima je raspored namenjen.'; }
+    catch { window.prompt('Kopiraj link rasporeda:', link); $('shareMessage').textContent = 'Link je prikazan za kopiranje.'; }
+  });
   function icsText(value) { return String(value).replace(/\\/g,'\\\\').replace(/\n/g,'\\n').replace(/,/g,'\\,').replace(/;/g,'\\;'); }
   function icsDate(date) { return String(date.getFullYear()) + String(date.getMonth() + 1).padStart(2,'0') + String(date.getDate()).padStart(2,'0'); }
   function exportCalendar() {
@@ -336,13 +413,5 @@
     $(id).addEventListener('change', () => { saved.hours[id] = $(id).value; save(); if (active()) renderDetails(); });
   });
   if (active()) show('dashboard'); else show('welcome');
-  fetch('/api/schedules').then(async (response) => {
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || '');
-    canEdit = result.canEdit !== false;
-    saved.schedules = { ...saved.schedules, ...result.schedules };
-    if (!active()) saved.activeKey = Object.keys(saved.schedules).sort().at(-1) || '';
-    save();
-    if (currentView !== 'import') show(active() ? 'dashboard' : 'welcome');
-  }).catch(() => { /* Previously confirmed local data remains available offline. */ });
+  loadShared();
 })();
