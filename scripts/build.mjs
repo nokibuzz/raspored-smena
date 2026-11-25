@@ -14,5 +14,6 @@ await rm(dist, { recursive: true, force: true });
 await mkdir(resolve(dist, 'server'), { recursive: true });
 await mkdir(resolve(dist, '.openai'), { recursive: true });
 await writeFile(resolve(dist, 'server/index.js'), worker.replace('__PAGE__', JSON.stringify(page)));
+await writeFile(resolve(dist, 'index.html'), page);
 await cp(resolve(root, '.openai/hosting.json'), resolve(dist, '.openai/hosting.json'));
 console.log('Built ' + dist);

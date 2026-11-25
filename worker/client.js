@@ -8,6 +8,8 @@
   let draft = null;
   let imageData = '';
   let selectedDay = 1;
+  let selectedReviewRow = 0;
+  let selectedReviewDay = 0;
   let currentView = 'welcome';
 
   function load() {
@@ -92,6 +94,8 @@
     try {
       const result = await window.RasporedOCR.recognize($('sourcePreview'), month, year, (message) => setNotice('recognitionMessage', message));
       draft = normalize(result);
+      draft.people.forEach((person, index) => { person.suggestions = result.people[index].suggestions; });
+      selectedReviewRow = 0;
       $('monthInput').value = String(draft.month);
       $('yearInput').value = String(draft.year);
       $('confirmCheck').checked = false;
@@ -133,6 +137,7 @@
     const month = Number($('monthInput').value), year = Number($('yearInput').value);
     if (!month || year < 2000 || year > 2100) return setNotice('recognitionMessage', 'Izaberi ispravan mesec i godinu.', true);
     draft = { month, year, people: [{ number: 1, name: '', shifts: Array(daysIn(month, year)).fill('-') }] };
+    selectedReviewRow = 0;
     $('confirmCheck').checked = false;
     renderReview();
     $('reviewSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -157,11 +162,77 @@
     if (!draft) return;
     const number = Math.max(0, ...draft.people.map((p) => p.number)) + 1;
     draft.people.push({ number, name: '', shifts: Array(daysIn(draft.month, draft.year)).fill('-') });
+    selectedReviewRow = draft.people.length - 1;
     $('confirmCheck').checked = false;
     renderReview();
     $('reviewTable').querySelector('tbody tr:last-child input[name="name"]')?.focus();
   });
   $('reviewSection').querySelector('.review-tools span').textContent += ' · —? uz ime: posle provere reda označi preostala nejasna polja kao slobodna';
+  $('reviewPersonSelect').addEventListener('change', () => {
+    selectedReviewRow = Number($('reviewPersonSelect').value);
+    selectedReviewDay = 0;
+    renderRowReview();
+  });
+
+  function renderRowReview() {
+    if (!draft?.people.length) return;
+    selectedReviewRow = Math.max(0, Math.min(selectedReviewRow, draft.people.length - 1));
+    const picker = $('reviewPersonSelect');
+    picker.replaceChildren();
+    draft.people.forEach((person, index) => picker.add(new Option(person.number + ' — ' + (person.name || 'bez imena'), String(index))));
+    picker.value = String(selectedReviewRow);
+    const person = draft.people[selectedReviewRow];
+    $('reviewRowTitle').textContent = 'Red ' + person.number + ' na originalnoj slici';
+    const image = $('sourcePreview');
+    const hasImage = !$('imageFrame').hidden && image.complete && !!image.naturalWidth;
+    $('rowImageHelp').hidden = hasImage;
+    const photo = $('reviewRowImage'); photo.replaceChildren();
+    if (hasImage) photo.append(window.RasporedOCR.previewRow(image, selectedReviewRow));
+    const grid = $('reviewDayGrid'); grid.replaceChildren();
+    person.shifts.forEach((code, dayIndex) => {
+      const cell = document.createElement('div');
+      cell.className = 'review-day' + (code === '?' ? ' unknown' : '') + (dayIndex === selectedReviewDay ? ' active' : '');
+      const label = document.createElement('label'); label.textContent = String(dayIndex + 1); label.htmlFor = 'review-day-' + dayIndex;
+      const select = document.createElement('select'); select.id = 'review-day-' + dayIndex;
+      select.setAttribute('aria-label', (dayIndex + 1) + '. ' + MONTHS[draft.month - 1] + ', red ' + person.number);
+      [['?','?'],['-','—'],['1','1'],['2','2'],['D','D'],['N','N']].forEach(([value, text]) => select.add(new Option(text, value)));
+      select.value = code;
+      const focusDay = () => {
+        selectedReviewDay = dayIndex;
+        grid.querySelectorAll('.review-day').forEach((item, index) => item.classList.toggle('active', index === dayIndex));
+        const preview = $('reviewDayImage'); preview.replaceChildren();
+        const title = document.createElement('span'); title.textContent = 'Dan ' + (dayIndex + 1) + ' · red ' + person.number;
+        preview.append(title);
+        if (hasImage) {
+          preview.append(window.RasporedOCR.previewCell(image, selectedReviewRow, dayIndex));
+          const g = window.RasporedOCR.readGrid();
+          const x = (g.dayStart - 2.5 + (g.right - g.dayStart) * dayIndex / 31) / (g.right - 2.5) * 1900;
+          photo.scrollLeft = Math.max(0, x - photo.clientWidth / 2);
+        }
+      };
+      select.addEventListener('focus', focusDay);
+      select.addEventListener('click', focusDay);
+      select.addEventListener('change', () => {
+        person.shifts[dayIndex] = select.value;
+        if (person.suggestions) person.suggestions[dayIndex] = null;
+        const tableSelect = $('reviewTable').rows[selectedReviewRow + 1]?.cells[dayIndex + 2]?.querySelector('select');
+        if (tableSelect) { tableSelect.value = select.value; tableSelect.className = 'v-' + select.value; }
+        cell.classList.toggle('unknown', select.value === '?');
+        cell.querySelector('.suggestion')?.remove();
+        updateReviewStatus();
+      });
+      cell.append(label, select);
+      if (code === '?' && person.suggestions?.[dayIndex]) {
+        const suggestion = document.createElement('button'); suggestion.type = 'button'; suggestion.className = 'suggestion';
+        suggestion.textContent = 'Predlog: ' + (person.suggestions[dayIndex] === '-' ? '—' : person.suggestions[dayIndex]);
+        suggestion.title = 'Prihvati predlog tek po poređenju sa fotografijom';
+        suggestion.addEventListener('click', () => { select.value = person.suggestions[dayIndex]; select.dispatchEvent(new Event('change')); focusDay(); });
+        cell.append(suggestion);
+      }
+      grid.append(cell);
+    });
+    grid.querySelectorAll('select')[selectedReviewDay]?.focus();
+  }
 
   function renderReview() {
     if (!draft) return;
@@ -179,11 +250,11 @@
       const row = document.createElement('tr');
       const numCell = document.createElement('td'), numInput = document.createElement('input');
       numInput.className = 'number-input'; numInput.type = 'number'; numInput.min = '1'; numInput.value = String(p.number); numInput.setAttribute('aria-label', 'Redni broj osobe');
-      numInput.addEventListener('change', () => { p.number = Number(numInput.value); updateReviewStatus(); });
+      numInput.addEventListener('change', () => { p.number = Number(numInput.value); updateReviewStatus(); renderRowReview(); });
       numCell.append(numInput); row.append(numCell);
       const nameCell = document.createElement('td'), nameInput = document.createElement('input');
       nameInput.name = 'name'; nameInput.value = p.name; nameInput.placeholder = 'Ime i prezime'; nameInput.setAttribute('aria-label', 'Ime i prezime osobe ' + (rowIndex + 1));
-      nameInput.addEventListener('input', () => { p.name = nameInput.value.trim(); updateReviewStatus(); });
+      nameInput.addEventListener('input', () => { p.name = nameInput.value.trim(); updateReviewStatus(); if (selectedReviewRow === rowIndex) $('reviewPersonSelect').selectedOptions[0].textContent = p.number + ' — ' + (p.name || 'bez imena'); });
       const nameWrap = document.createElement('div'); nameWrap.className = 'name-wrap';
       const fillOff = document.createElement('button'); fillOff.type = 'button'; fillOff.textContent = '—?';
       fillOff.title = 'Posle provere reda, označi preostala nejasna polja kao slobodna';
@@ -200,7 +271,7 @@
         select.setAttribute('aria-label', p.name + ', ' + (dayIndex + 1) + '. ' + MONTHS[draft.month - 1]);
         [['?','?'],['-','—'],['1','1'],['2','2'],['D','D'],['N','N']].forEach(([value, label]) => select.add(new Option(label, value)));
         select.value = code;
-        select.addEventListener('change', () => { p.shifts[dayIndex] = select.value; select.className = 'v-' + select.value; updateReviewStatus(); });
+        select.addEventListener('change', () => { p.shifts[dayIndex] = select.value; if (p.suggestions) p.suggestions[dayIndex] = null; select.className = 'v-' + select.value; updateReviewStatus(); if (selectedReviewRow === rowIndex) renderRowReview(); });
         select.addEventListener('focus', () => {
           const image = $('sourcePreview');
           if ($('imageFrame').hidden || !image.complete || !image.naturalWidth) return;
@@ -223,6 +294,7 @@
     });
     table.append(tbody);
     updateReviewStatus();
+    renderRowReview();
   }
   $('confirmCheck').addEventListener('change', updateReviewStatus);
   function reviewProblems() {

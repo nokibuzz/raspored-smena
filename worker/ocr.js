@@ -72,10 +72,34 @@
     return crop(image, x + 1, y + 1, cellWidth - 2, rowHeight - 2, 260, 230);
   }
 
-  function cleanName(result) {
-    const raw = result.items.map((item) => item.text).join(' ');
-    const name = raw.replace(/^[\s\d.,:;]+/, '').replace(/[^\p{L}\p{M}\s'-]/gu, ' ').replace(/\s+/g, ' ').trim();
-    return name.length >= 3 ? name : '?';
+  function previewRow(image, row) {
+    const grid = readGrid(), w = image.naturalWidth, h = image.naturalHeight;
+    const rowHeight = h * (grid.bottom - grid.top) / (100 * grid.rows);
+    const x = w * .025;
+    const y = h * (grid.top + grid.tilt * .025) / 100 + row * rowHeight;
+    return crop(image, x, y, w * grid.right / 100 - x, rowHeight, 1900, 100);
+  }
+
+  function enhanceCell(source) {
+    const canvas = document.createElement('canvas');
+    canvas.width = source.width * 2; canvas.height = source.height * 2;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+    const image = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    for (let i = 0; i < image.data.length; i += 4) {
+      const r = image.data[i], g = image.data[i + 1], b = image.data[i + 2];
+      const ink = (r * .3 + g * .59 + b * .11 < 173) || (r - g > 27 && r - b > 18);
+      const value = ink ? 20 : 255;
+      image.data[i] = value; image.data[i + 1] = value; image.data[i + 2] = value;
+    }
+    ctx.putImageData(image, 0, 0);
+    return canvas;
+  }
+
+  function cleanName(result, row) {
+    const words = result.items.flatMap((item) => item.text.split(/[\s-]+/).map((text) => ({ text: text.replace(/[^\p{L}]/gu, ''), score: item.score })))
+      .filter((item) => item.text.length >= 2 && item.score >= .5);
+    return words.length >= 2 ? words.slice(0, 2).map((item) => item.text[0].toLocaleUpperCase('sr') + '.').join(' ') : 'Red ' + (row + 1);
   }
 
   function visualFeatures(canvas) {
@@ -104,17 +128,22 @@
   }
 
   function classify(result, canvas) {
-    const raw = result.items.map((item) => item.text).join(' ').trim().toUpperCase().replace(/\s+/g, '');
-    const score = result.items.length ? Math.min(...result.items.map((item) => item.score)) : 0;
+    const raw = result.items.map((item) => item.text).join(' ').trim().toUpperCase().replace(/\s+/g, '').replace(/[ОO]/g, 'O').replace(/[НH]/g, 'H');
+    const score = result.items.length ? Math.max(...result.items.map((item) => item.score)) : 0;
     const visual = visualFeatures(canvas);
-    if (visual.slash) return '-';
-    if (/^(13[\/-]?21|13[\/-]?2[1I]|2)$/.test(raw) && score > .55) return '2';
-    if (/^(0?7[\/-]?15|7[\/-]?15|1)$/.test(raw) && score > .6) return '1';
-    if (raw === 'D' && score >= .6) return 'D';
-    if ((raw === 'N' && score >= .6) || (raw === 'H' && score >= .55 && visual.red > .015)) return 'N';
-    if (['SL','SЛ','SLOBODNO','/','-','—','一'].includes(raw) && score >= .5) return '-';
-    if (visual.blank || visual.slash) return '-';
-    return '?';
+    const finish = (code, suggestion = code) => ({ code, suggestion, raw });
+    if (/S[LЛ1I]|SLOB|SLO[B8]/.test(raw) && score >= .35) return finish('-');
+    if (visual.slash || ['/', '-', '—', '一', 'SL'].includes(raw) || visual.blank) return finish('-');
+    const second = /(?:13|21)/.test(raw), first = /(?:0?7|15)/.test(raw);
+    if (second && !first && score >= .36) return finish('2');
+    if (first && !second && score >= .36) return finish('1');
+    if (/^[DДO0Q][.,:;!?]*$/.test(raw) && score >= .35) return finish('D');
+    if (/^[HNИ][.,:;!?]*$/.test(raw) && score >= .35) return finish('N');
+    if (raw === '2' && score >= .65) return finish('2');
+    if (raw === '1' && score >= .65) return finish('1');
+    if (visual.red > .035) return finish('N');
+    const suggestion = second ? '2' : first ? '1' : /^[DДO0Q]/.test(raw) ? 'D' : /^[HNИ]/.test(raw) || visual.red > .025 ? 'N' : '-';
+    return finish('?', suggestion);
   }
 
   async function getEngine(onProgress) {
@@ -146,18 +175,37 @@
       onProgress('Čitam polja: ' + Math.min(start + 64, cells.length) + ' / ' + cells.length + '…');
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
+    const classified = results.map((result, index) => classify(result, cells[index]));
+    const uncertain = classified.flatMap((item, index) => item.code === '?' ? [index] : []);
+    if (uncertain.length) {
+      onProgress('Pokušavam dodatno čitanje ' + uncertain.length + ' nejasnih polja…');
+      for (let start = 0; start < uncertain.length; start += 64) {
+        const indices = uncertain.slice(start, start + 64);
+        const enhanced = indices.map((index) => enhanceCell(cells[index]));
+        const retry = await engine.predict(enhanced, { textDetLimitSideLen: 360, textDetLimitType: 'max' });
+        retry.forEach((result, offset) => {
+          const index = indices[offset], newer = classify(result, cells[index]);
+          if (newer.code !== '?') classified[index] = newer;
+          else if (classified[index].suggestion === '-' && newer.suggestion !== '-') classified[index] = newer;
+        });
+        onProgress('Dodatno čitanje: ' + Math.min(start + 64, uncertain.length) + ' / ' + uncertain.length + '…');
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
     const people = [];
     for (let row = 0; row < grid.rows; row++) {
-      const shifts = [];
+      const shifts = [], suggestions = [];
       for (let day = 0; day < dayCount; day++) {
         const index = row * dayCount + day;
-        shifts.push(classify(results[index], cells[index]));
+        const value = classified[index];
+        shifts.push(value.code);
+        suggestions.push(value.code === '?' ? value.suggestion : null);
       }
-      people.push({ number: row + 1, name: cleanName(nameResults[row]), shifts });
+      people.push({ number: row + 1, name: cleanName(nameResults[row], row), shifts, suggestions });
     }
     const unknown = people.reduce((sum, person) => sum + person.shifts.filter((code) => code === '?').length, 0);
     return { month, year, people, unknown };
   }
 
-  window.RasporedOCR = { readGrid, renderGrid, recognize, previewCell };
+  window.RasporedOCR = { readGrid, renderGrid, recognize, previewCell, previewRow };
 })();
